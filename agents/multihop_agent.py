@@ -1,6 +1,7 @@
 # hmafqa/agents/multihop_agent.py
 import logging
 from typing import Dict, Any, List, Optional, Tuple
+import re
 
 import openai
 

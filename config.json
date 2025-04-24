@@ -1,0 +1,13 @@
+{
+    "document_index_path": "data/document_index",
+    "table_index_path": "data/table_index",
+    "faq_index_path": "data/faq_index.json",
+    "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+    "extractive_model": "deepset/roberta-base-squad2",
+    "expert_model_path": "models/expert_qa",
+    "llm_model": "gpt-4",
+    "top_k_docs": 5,
+    "top_k_tables": 3,
+    "max_hops": 3,
+    "api_key": "your-openai-api-key"
+}

@@ -1,6 +1,8 @@
 # hmafqa/main.py
 import logging
 import os
+import json
+import re
 from typing import Dict, Any, List, Optional
 
 from .agents import (
@@ -126,9 +128,47 @@ class HMAFQA:
         Returns:
             Dictionary mapping FAQ IDs to FAQ data
         """
-        # This is a placeholder - actual implementation would load from file
-        # For now, return an empty dictionary or sample data
-        return {}
+        try:
+            if os.path.exists(index_path):
+                with open(index_path, 'r', encoding='utf-8') as f:
+                    faq_index = json.load(f)
+                logger.info(f"Loaded {len(faq_index)} FAQs from {index_path}")
+                return faq_index
+            else:
+                logger.warning(f"FAQ index file {index_path} not found, using empty index")
+                return {}
+        except Exception as e:
+            logger.error(f"Error loading FAQ index: {e}")
+            return {}
+    
+    def _select_applicable_agents(self, question: str) -> Dict[str, BaseAgent]:
+        """
+        Determine which agents are applicable to the given question.
+        
+        Args:
+            question: The user's question
+            
+        Returns:
+            Dictionary of applicable agents
+        """
+        applicable_agents = {}
+        
+        for agent_name, agent in self.agents.items():
+            try:
+                if agent.is_applicable(question):
+                    applicable_agents[agent_name] = agent
+                    logger.info(f"Agent {agent_name} is applicable to the question")
+                else:
+                    logger.info(f"Agent {agent_name} is not applicable to the question")
+            except Exception as e:
+                logger.error(f"Error checking if agent {agent_name} is applicable: {e}")
+        
+        if not applicable_agents:
+            # If no agent is applicable, fallback to using all agents
+            logger.warning("No agent is applicable to the question, using all agents as fallback")
+            applicable_agents = self.agents
+        
+        return applicable_agents
     
     def answer_question(self, question: str, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -168,6 +208,18 @@ class HMAFQA:
                 logger.error(f"Error from agent {agent_name}: {e}")
         
         # 3. Use the judge to select or synthesize the final answer
+        if not candidate_answers:
+            # If no agent provided a valid answer, return a default response
+            logger.warning("No agent provided a valid answer")
+            return {
+                "answer": "I don't have enough information to answer this question.",
+                "explanation": "None of the agents could provide a valid answer.",
+                "source": "None",
+                "agent_used": None
+            }
+        
         final_result = self.judge.evaluate(question, candidate_answers)
         
         logger.info(f"Final answer selected from {final_result.get('agent_used', 'unknown')}")
+        
+        return final_result
