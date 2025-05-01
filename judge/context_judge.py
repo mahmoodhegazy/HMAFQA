@@ -1,10 +1,9 @@
-# hmafqa/judge/context_judge.py
 import logging
 import json
 import re
 from typing import Dict, Any, List, Optional, Tuple
 
-import openai
+from ..utils.model_client import ModelClient
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +12,16 @@ class ContextJudge:
     Context-aware judge that evaluates agent outputs and selects the best answer.
     """
     
-    def __init__(self, model: str = "gpt-4"):
+    def __init__(self, model: str = "gpt-4", model_client: Optional[ModelClient] = None):
         """
         Initialize the Context Judge.
         
         Args:
-            model: The OpenAI model to use
+            model: The model to use
+            model_client: Optional ModelClient instance for model access
         """
         self.model = model
+        self.model_client = model_client
     
     def evaluate(self, question: str, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -71,93 +72,33 @@ class ContextJudge:
             Dictionary with final answer, explanation, and source
         """
         try:
-            # Create prompt with all candidates
+            # Create prompt for the judge
             prompt = self._create_judge_prompt(question, candidates)
             
-            # Get judge decision
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-            )
+            # Get judge decision using model client if available
+            if self.model_client:
+                system_message = self._get_system_prompt()
+                response_text = self.model_client.create_completion(
+                    system_message=system_message,
+                    user_message=prompt,
+                    temperature=0.2
+                )
+            else:
+                # Legacy direct API call (for backward compatibility)
+                import openai
+                response = openai.ChatCompletion.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self._get_system_prompt()},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2,
+                )
+                response_text = response.choices[0].message.content
             
-            content = response.choices[0].message.content
+            # Parse the response to get the final answer
+            return self._parse_judge_response(response_text, candidates)
             
-            # Parse judge decision
-            try:
-                # Extract JSON decision if available
-                json_match = re.search(r'({.*})', content, re.DOTALL)
-                if json_match:
-                    decision = json.loads(json_match.group(1))
-                    
-                    # Check if we're selecting an existing answer or synthesizing
-                    if decision.get("choice") == "synthesize":
-                        # Judge created a new answer
-                        return {
-                            "answer": decision.get("final_answer", ""),
-                            "explanation": decision.get("reasoning", ""),
-                            "source": "Synthesized from multiple agents: " + ", ".join([c.get("agent", "Unknown") for c in candidates]),
-                            "agent_used": "Judge (synthesized)"
-                        }
-                    else:
-                        # Judge selected an existing answer
-                        choice_idx = int(decision.get("choice", 0))
-                        if 0 <= choice_idx < len(candidates):
-                            chosen = candidates[choice_idx]
-                            return {
-                                "answer": chosen["answer"],
-                                "explanation": decision.get("reasoning", ""),
-                                "source": chosen.get("evidence", ""),
-                                "agent_used": chosen.get("agent", "Unknown")
-                            }
-                
-                # Fallback parsing if JSON extraction fails
-                # Look for a direct choice indication
-                choice_match = re.search(r'choice:?\s*(\d+)', content, re.IGNORECASE)
-                if choice_match:
-                    choice_idx = int(choice_match.group(1))
-                    if 0 <= choice_idx < len(candidates):
-                        chosen = candidates[choice_idx]
-                        return {
-                            "answer": chosen["answer"],
-                            "explanation": content,
-                            "source": chosen.get("evidence", ""),
-                            "agent_used": chosen.get("agent", "Unknown")
-                        }
-                
-                # If we couldn't find a choice, extract the answer directly
-                answer_match = re.search(r'(?i)final answer:?\s*(.+?)(?=\n\n|\nreasoning|\n[0-9]|\n[A-Z]|$)', content, re.DOTALL)
-                if answer_match:
-                    final_answer = answer_match.group(1).strip()
-                    return {
-                        "answer": final_answer,
-                        "explanation": content,
-                        "source": "Judge synthesis based on multiple agents",
-                        "agent_used": "Judge (direct extraction)"
-                    }
-                
-                # Last resort: treat the whole response as the answer
-                return {
-                    "answer": content,
-                    "explanation": "Direct judge output.",
-                    "source": "Judge synthesis",
-                    "agent_used": "Judge (full response)"
-                }
-                
-            except Exception as e:
-                logger.error(f"Error parsing judge decision: {e}")
-                # Use highest confidence answer as fallback
-                highest_conf = max(candidates, key=lambda x: x.get("confidence", 0))
-                return {
-                    "answer": highest_conf["answer"],
-                    "explanation": f"Parsing error: {str(e)}. Using highest confidence answer.",
-                    "source": highest_conf.get("evidence", ""),
-                    "agent_used": highest_conf.get("agent", "Unknown") + " (fallback)"
-                }
-                
         except Exception as e:
             logger.error(f"Error in judge evaluation: {e}")
             # Use highest confidence answer as fallback

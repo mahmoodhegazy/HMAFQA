@@ -1,4 +1,3 @@
-# hmafqa/main.py
 import logging
 import os
 import json
@@ -15,6 +14,7 @@ from .judge.context_judge import ContextJudge
 from .retrieval.document_retriever import DocumentRetriever
 from .retrieval.table_retriever import TableRetriever
 from .config import Settings
+from .utils.model_client import ModelClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,7 +35,34 @@ class HMAFQA:
             settings: Configuration settings
         """
         self.settings = settings or Settings()
+        
+        # Initialize model client first (will be used by other components)
+        self._initialize_model_client()
+        
+        # Initialize other components
         self._initialize_components()
+    
+    def _initialize_model_client(self):
+        """Initialize the centralized model client."""
+        try:
+            self.model_client = ModelClient(
+                provider=self.settings.model_provider,
+                model=self.settings.llm_model,
+                api_key=self.settings.api_key,
+                api_version=self.settings.api_version,
+                azure_endpoint=self.settings.azure_endpoint,
+                certificate_path=self.settings.certificate_path,
+                client_id=self.settings.client_id,
+                tenant_id=self.settings.tenant_id,
+                scope=self.settings.scope,
+                max_retries=self.settings.max_retries,
+                retry_delay=self.settings.retry_delay,
+                proxy_config=self.settings.proxy_config
+            )
+            logger.info(f"Initialized model client using {self.settings.model_provider} provider")
+        except Exception as e:
+            logger.error(f"Error initializing model client: {e}")
+            raise
     
     def _initialize_components(self):
         """Initialize all components of the framework."""
@@ -59,17 +86,20 @@ class HMAFQA:
         # Original FAQ agents
         self.agents["FAQ_Embedding"] = FAQEmbeddingAgent(
             faq_index=self.faq_index,
-            embedding_model=self.settings.embedding_model
+            embedding_model=self.settings.embedding_model,
+            model_client=self.model_client  # Pass model client to agent
         )
         
         self.agents["FAQ_Prompt"] = FAQPromptAgent(
             faq_index=self.faq_index,
-            model=self.settings.llm_model
+            model=self.settings.llm_model,
+            model_client=self.model_client
         )
         
         self.agents["FAQ_AnswerContext"] = FAQAnswerContextAgent(
             faq_index=self.faq_index,
-            model=self.settings.llm_model
+            model=self.settings.llm_model,
+            model_client=self.model_client
         )
         
         # New QA agents
@@ -82,19 +112,22 @@ class HMAFQA:
         self.agents["Generative_QA"] = GenerativeQAAgent(
             document_retriever=self.document_retriever,
             model=self.settings.llm_model,
-            top_k_docs=self.settings.top_k_docs
+            top_k_docs=self.settings.top_k_docs,
+            model_client=self.model_client
         )
         
         self.agents["Calculator"] = CalculatorAgent(
             document_retriever=self.document_retriever,
             model=self.settings.llm_model,
-            top_k_docs=self.settings.top_k_docs
+            top_k_docs=self.settings.top_k_docs,
+            model_client=self.model_client
         )
         
         self.agents["Table_QA"] = TableQAAgent(
             table_retriever=self.table_retriever,
             model=self.settings.llm_model,
-            top_k_tables=self.settings.top_k_tables
+            top_k_tables=self.settings.top_k_tables,
+            model_client=self.model_client
         )
         
         # Expert agent
@@ -110,11 +143,15 @@ class HMAFQA:
             document_retriever=self.document_retriever,
             agents=self.agents,
             model=self.settings.llm_model,
-            max_hops=self.settings.max_hops
+            max_hops=self.settings.max_hops,
+            model_client=self.model_client
         )
         
         # Initialize judge
-        self.judge = ContextJudge(model=self.settings.llm_model)
+        self.judge = ContextJudge(
+            model=self.settings.llm_model,
+            model_client=self.model_client
+        )
         
         logger.info(f"Initialized HMAFQA with {len(self.agents)} agents")
     
