@@ -260,3 +260,46 @@ class HMAFQA:
         logger.info(f"Final answer selected from {final_result.get('agent_used', 'unknown')}")
         
         return final_result
+    
+    def _select_agents_for_question(self, question: str) -> Dict[str, BaseAgent]:
+        """
+        Dynamically select agents based on question properties.
+        
+        Args:
+            question: The user's question
+            
+        Returns:
+            Dictionary of selected agents
+        """
+        selected_agents = {}
+        
+        # Always include FAQ agents for potential FAQ matches
+        for agent_name in ["FAQ_Embedding", "FAQ_Prompt", "FAQ_AnswerContext"]:
+            if agent_name in self.agents:
+                selected_agents[agent_name] = self.agents[agent_name]
+        
+        # Check for numerical computations
+        if re.search(r'(calculate|compute|how much|what is the total|percentage|difference)', question, re.IGNORECASE):
+            if "Calculator" in self.agents:
+                selected_agents["Calculator"] = self.agents["Calculator"]
+        
+        # Check for table-related questions
+        if re.search(r'(table|row|column|balance sheet|income statement|financial statement)', question, re.IGNORECASE):
+            if "Table_QA" in self.agents:
+                selected_agents["Table_QA"] = self.agents["Table_QA"]
+        
+        # Check for multi-hop reasoning
+        if re.search(r'(and|also|both|compare|relation|between)', question, re.IGNORECASE):
+            if "MultiHop" in self.agents:
+                selected_agents["MultiHop"] = self.agents["MultiHop"]
+        
+        # Always include generative and extractive agents as fallbacks
+        for agent_name in ["Generative_QA", "Extractive_QA"]:
+            if agent_name in self.agents:
+                selected_agents[agent_name] = self.agents[agent_name]
+        
+        # Include expert agent for domain-specific knowledge
+        if "Expert_QA" in self.agents:
+            selected_agents["Expert_QA"] = self.agents["Expert_QA"]
+        
+        return selected_agents
